@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>财富终端 · 基金</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1 class="brand">财富终端 · 基金</h1>
+      <div class="topbar-right">
+        <span id="data-status"><span class="badge">加载中…</span></span>
+      </div>
+    </div>
+    <div id="error-banner" class="error-banner hidden">
+      <span>⚠ 数据源暂不可达：当前无法获取实时数据。请稍后重试，或先运行 <code>python -m fundtool doctor</code> 检查环境。</span>
+    </div>
+  </header>
+
+  <!-- 页签导航（hash 路由） -->
+  <nav class="tabs">
+    <a class="tab-link active" href="#portfolio" data-tab="portfolio">持仓</a>
+    <a class="tab-link" href="#rank" data-tab="rank">排行</a>
+    <a class="tab-link" href="#fund" data-tab="fund">详情</a>
+  </nav>
+
+  <main class="container">
+
+    <!-- ============ 持仓页 ============ -->
+    <section id="tab-portfolio" class="tab">
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">总市值</div>
+          <div class="stat-value" id="stat-mv">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">总成本</div>
+          <div class="stat-value" id="stat-cost">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">总盈亏</div>
+          <div class="stat-value" id="stat-pnl">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">总收益率</div>
+          <div class="stat-value" id="stat-pnl-pct">—</div>
+        </div>
+      </div>
+
+      <div class="card table-card">
+        <div class="table-head">
+          <span class="table-title">我的持仓</span>
+          <span id="portfolio-updated" class="muted"></span>
+          <button id="btn-add-holding" class="btn btn-primary" type="button">＋ 添加持仓</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>代码</th><th>名称</th><th>备注</th>
+                <th class="num">份额</th><th class="num">成本净值</th><th class="num">最新净值</th>
+                <th>净值日期</th><th class="num">市值</th><th class="num">盈亏</th>
+                <th class="num">盈亏率</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="portfolio-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 排行页 ============ -->
+    <section id="tab-rank" class="tab hidden">
+      <div class="card">
+        <div class="toolbar">
+          <label>类型
+            <select id="rank-type"></select>
+          </label>
+          <label>排序
+            <select id="rank-sort"></select>
+          </label>
+          <label>方向
+            <select id="rank-order">
+              <option value="desc" selected>降序</option>
+              <option value="asc">升序</option>
+            </select>
+          </label>
+          <input id="rank-kw" type="text" placeholder="代码或名称，如 161725 / 白酒" autocomplete="off">
+          <button id="rank-query" class="btn btn-primary" type="button">查询</button>
+          <span id="rank-fetched" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="card table-card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="num">序号</th><th>代码</th><th>名称</th><th>日期</th>
+                <th class="num">净值</th><th class="num">日增</th><th class="num">1周</th>
+                <th class="num">1月</th><th class="num">3月</th><th class="num">6月</th>
+                <th class="num">1年</th><th class="num">2年</th><th class="num">3年</th>
+                <th class="num">今年来</th><th class="num">成立来</th>
+              </tr>
+            </thead>
+            <tbody id="rank-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button id="rank-prev" class="btn btn-sm" type="button">上一页</button>
+          <span id="rank-page-info" class="muted"></span>
+          <button id="rank-next" class="btn btn-sm" type="button">下一页</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 详情页 ============ -->
+    <section id="tab-fund" class="tab hidden">
+      <div class="card">
+        <div class="search-box" id="search-box">
+          <input id="fund-search" type="text" placeholder="输入基金代码或名称搜索，如 161725 / 白酒"
+                 autocomplete="off" role="combobox" aria-expanded="false" aria-controls="fund-suggestions">
+          <div id="fund-suggestions" class="suggestions hidden"></div>
+        </div>
+      </div>
+
+      <div id="fund-info-wrap"></div>
+
+      <div class="card" id="nav-card">
+        <div class="chart-head">
+          <span class="chart-title">净值走势</span>
+          <div class="seg-group" id="nav-range-group">
+            <button class="seg-btn" type="button" data-range="1m">近1月</button>
+            <button class="seg-btn" type="button" data-range="3m">近3月</button>
+            <button class="seg-btn" type="button" data-range="6m">近6月</button>
+            <button class="seg-btn active" type="button" data-range="1y">近1年</button>
+            <button class="seg-btn" type="button" data-range="3y">近3年</button>
+            <button class="seg-btn" type="button" data-range="all">成立来</button>
+          </div>
+          <label class="chk-label">
+            <input type="checkbox" id="nav-normalized"> 归一化（初始=100）
+          </label>
+        </div>
+        <div id="nav-stale-note" class="stale-note hidden">（缓存数据）</div>
+        <div id="nav-chart" class="chart-box"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 添加/编辑持仓弹窗 -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <h2 id="modal-title">添加持仓</h2>
+        <button id="modal-close" class="icon-btn" type="button" aria-label="关闭">×</button>
+      </div>
+      <form id="holding-form" novalidate>
+        <div class="form-row">
+          <label for="f-code">基金代码 <b>*</b></label>
+          <input id="f-code" inputmode="numeric" maxlength="6" placeholder="6 位数字代码，如 161725">
+        </div>
+        <div class="form-row">
+          <label for="f-shares">份额 <b>*</b></label>
+          <input id="f-shares" type="number" min="0" step="any" placeholder="如 10000">
+        </div>
+        <div class="form-row">
+          <label for="f-cost">成本净值 <b>*</b></label>
+          <input id="f-cost" type="number" min="0" step="any" placeholder="如 1.65">
+        </div>
+        <div class="form-row">
+          <label for="f-name">基金名称</label>
+          <input id="f-name" maxlength="50" placeholder="选填，留空时服务端自动补全">
+        </div>
+        <div class="form-row">
+          <label for="f-note">备注</label>
+          <input id="f-note" maxlength="50" placeholder="选填">
+        </div>
+        <div id="modal-error" class="form-error hidden"></div>
+        <div class="modal-foot">
+          <button type="button" class="btn" id="modal-cancel">取消</button>
+          <button type="submit" class="btn btn-primary" id="modal-submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- toast 容器 -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script src="chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
