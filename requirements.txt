@@ -3,3 +3,7 @@ akshare==1.18.88
 fastapi==0.128.8
 uvicorn==0.39.0
 pandas==2.3.3
+# numpy 2.x 的 Windows wheel 要求 X86_V2 基线（SSE4.2/popcnt），
+# 在不支持该指令集的老 CPU 上 import 即崩溃（RuntimeError: baseline optimizations）。
+# 1.26.4 是 pandas 2.3.3 支持的最后 numpy 1.x，兼容所有 x86-64 CPU。
+numpy==1.26.4
