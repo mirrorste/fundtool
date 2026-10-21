@@ -30,19 +30,34 @@ RangeKey = Literal["1m", "3m", "6m", "1y", "3y", "all"]
 
 
 class HoldingIn(BaseModel):
-    """POST /api/portfolio 请求体（6 位代码 / 份数>0 / 成本>0 / 名称备注≤50）。"""
+    """POST /api/portfolio 请求体。
+
+    支持两种录入方式（二选一）：
+    - 直接录入：shares + cost_nav
+    - 反推录入：market_value +（pnl_pct 或 pnl_amount），服务端按最新净值
+      自动计算份额与成本净值
+    """
     fund_code: str = Field(..., pattern=r"^\d{6}$")
-    shares: float = Field(..., gt=0)
-    cost_nav: float = Field(..., gt=0)
+    shares: Optional[float] = Field(None, gt=0)
+    cost_nav: Optional[float] = Field(None, gt=0)
+    market_value: Optional[float] = Field(None, gt=0)
+    pnl_pct: Optional[float] = Field(None, description="持有盈亏率（%），亏损为负")
+    pnl_amount: Optional[float] = Field(None, description="持有盈亏额（元），亏损为负")
     fund_name: str = Field("", max_length=50)
     note: str = Field("", max_length=50)
 
 
 class HoldingUpdate(BaseModel):
-    """PUT /api/portfolio/{id} 部分更新（全 Optional，至少一项由路由校验）。"""
+    """PUT /api/portfolio/{id} 部分更新（至少一项）。
+
+    同 POST：支持直接录入 shares+cost_nav，或按市值反推 market_value + pnl_pct/pnl_amount。
+    """
     fund_code: Optional[str] = Field(None, pattern=r"^\d{6}$")
     shares: Optional[float] = Field(None, gt=0)
     cost_nav: Optional[float] = Field(None, gt=0)
+    market_value: Optional[float] = Field(None, gt=0)
+    pnl_pct: Optional[float] = Field(None)
+    pnl_amount: Optional[float] = Field(None)
     fund_name: Optional[str] = Field(None, max_length=50)
     note: Optional[str] = Field(None, max_length=50)
 
@@ -126,7 +141,10 @@ def create_app() -> FastAPI:
     @app.post("/api/portfolio", status_code=201)
     def portfolio_add(body: HoldingIn):
         return add_holding(body.fund_code, body.shares, body.cost_nav,
-                           body.fund_name, body.note)
+                           body.fund_name, body.note,
+                           market_value=body.market_value,
+                           pnl_pct=body.pnl_pct,
+                           pnl_amount=body.pnl_amount)
 
     @app.put("/api/portfolio/{holding_id}")
     def portfolio_update(holding_id: int, body: HoldingUpdate):

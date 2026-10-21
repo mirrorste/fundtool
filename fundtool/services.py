@@ -350,15 +350,15 @@ def _resolve_holding_nav(code: str, rank_map: dict):
 
 
 def _holding_row(h: dict, nav, nav_date, stale: bool) -> dict:
-    """持仓行 + 实时计算字段；金额 2 位小数，nav 保留原始精度。"""
+    """持仓行 + 实时计算字段；金额 2 位小数，nav/cost_nav 4 位小数。"""
     shares = float(h["shares"])
-    cost_nav = float(h["cost_nav"])
+    cost_nav = round(float(h["cost_nav"]), 4)
     if nav is None:
         market_value = cost_value = pnl = pnl_pct = None
         nav_out = None
     else:
         nav = float(nav)
-        nav_out = nav
+        nav_out = round(nav, 4)
         market_value = round(shares * nav, 2)
         cost_value = round(shares * cost_nav, 2)
         # pnl 基于已舍入的 mv/cv，pnl_pct 基于 nav/cost_nav（与契约验算口径一致）
@@ -407,19 +407,80 @@ def portfolio_view() -> dict:
     return {"updated_at": _now_str(), "holdings": rows, "summary": summary}
 
 
-def add_holding(fund_code: str, shares: float, cost_nav: float,
-                fund_name: str = "", note: str = "") -> dict:
-    """新增持仓，返回含实时计算字段的完整行；重复 code 抛 ConflictError。"""
+def _derive_shares_cost(code: str, market_value: float,
+                        pnl_pct=None, pnl_amount=None):
+    """按最新净值把「当前市值 + 持有盈亏」反推为 (shares, cost_nav)。
+
+    - 份额：shares = 市值 / 最新净值（2 位小数）
+    - 盈亏率口径：cost_nav = nav / (1 + pnl_pct/100)
+    - 盈亏额口径：cost_value = 市值 - pnl_amount，cost_nav = cost_value / shares
+    """
+    if market_value <= 0:
+        raise ValueError("market_value 必须大于 0")
+    if pnl_pct is not None:
+        pnl_pct = float(pnl_pct)
+        if pnl_pct <= -100:
+            raise ValueError("持有盈亏率必须大于 -100%")
+    if pnl_amount is not None:
+        pnl_amount = float(pnl_amount)
+        if pnl_amount >= market_value:
+            raise ValueError("持有盈亏额必须小于当前市值")
+    nav, _, _ = _resolve_holding_nav(code, _rank_nav_map())
+    if nav is None or float(nav) <= 0:
+        raise DataSourceError("暂无法获取该基金最新净值，无法按市值反推份额")
+    nav = float(nav)
+    shares = round(market_value / nav, 2)
+    if shares <= 0:
+        raise ValueError("按最新净值计算得到的份额为 0，请检查当前市值")
+    if pnl_pct is not None:
+        cost_nav = nav / (1.0 + pnl_pct / 100.0)
+    else:
+        cost_nav = (market_value - float(pnl_amount)) / shares
+    cost_nav = round(cost_nav, 4)
+    if cost_nav <= 0:
+        raise ValueError("按最新净值计算得到的成本净值必须大于 0")
+    return shares, cost_nav
+
+
+def add_holding(fund_code: str, shares: float = None, cost_nav: float = None,
+                fund_name: str = "", note: str = "",
+                market_value: float = None, pnl_pct: float = None,
+                pnl_amount: float = None) -> dict:
+    """新增持仓，返回含实时计算字段的完整行；重复 code 抛 ConflictError。
+
+    两种录入方式（二选一）：
+    - shares + cost_nav 直接录入
+    - market_value + pnl_pct/pnl_amount 按最新净值反推份额与成本净值
+    """
     fund_code = str(fund_code)
     if not _CODE_RE.match(fund_code):
         raise ValueError(f"fund_code 必须为 6 位数字：{fund_code}")
-    shares, cost_nav = float(shares), float(cost_nav)
-    if shares <= 0:
-        raise ValueError("shares 必须大于 0")
-    if cost_nav <= 0:
-        raise ValueError("cost_nav 必须大于 0")
+
+    by_value = (market_value is not None or pnl_pct is not None
+                or pnl_amount is not None)
+    if by_value:
+        if shares is not None or cost_nav is not None:
+            raise ValueError("份额/成本净值与市值/持有盈亏不能同时填写")
+        if market_value is None:
+            raise ValueError("按市值录入时必须提供 market_value")
+        if (pnl_pct is None) == (pnl_amount is None):
+            raise ValueError("持有盈亏率与持有盈亏额必须且只能填写一项")
+    else:
+        if shares is None or cost_nav is None:
+            raise ValueError("需填写份额与成本净值，或当前市值与持有盈亏")
+        shares, cost_nav = float(shares), float(cost_nav)
+        if shares <= 0:
+            raise ValueError("shares 必须大于 0")
+        if cost_nav <= 0:
+            raise ValueError("cost_nav 必须大于 0")
+
     if db.get_holding_by_code(fund_code):
         raise ConflictError("该基金已在持仓中")
+
+    if by_value:
+        shares, cost_nav = _derive_shares_cost(
+            fund_code, float(market_value), pnl_pct, pnl_amount)
+
     if not fund_name:
         fund_name = _name_of(fund_code)   # 名录补全，补不到留空
     hid = db.add_holding(fund_code, fund_name, shares, cost_nav, note or "")
@@ -429,28 +490,76 @@ def add_holding(fund_code: str, shares: float, cost_nav: float,
 
 
 def update_holding(holding_id: int, **fields) -> dict:
-    """部分更新持仓（fields ∈ fund_code/fund_name/shares/cost_nav/note），
-    返回更新后的完整行；id 不存在抛 FundNotFound，code 与他人冲突抛 ConflictError。"""
-    unknown = set(fields) - {"fund_code", "fund_name", "shares", "cost_nav", "note"}
+    """部分更新持仓，返回更新后的完整行。
+
+    两种更新方式（互斥）：
+    - 直接：shares 和/或 cost_nav 改动（fund_code/fund_name/note 同以前）
+    - 反推：market_value + pnl_pct/pnl_amount（复用 _derive_shares_cost 计算新的 shares/cost_nav）
+
+    id 不存在抛 FundNotFound；code 与他人冲突抛 ConflictError。
+    """
+    # 分离：字段 → DB 直接更新；反推参数 → 先算 shares/cost_nav 再写 DB
+    known = {"fund_code", "fund_name", "shares", "cost_nav", "note",
+             "market_value", "pnl_pct", "pnl_amount"}
+    unknown = set(fields) - known
     if unknown:
         raise ValueError(f"不支持的更新字段：{sorted(unknown)}")
-    fc = fields.get("fund_code")
+
+    direct_db = {k: v for k, v in fields.items()
+                 if k not in ("market_value", "pnl_pct", "pnl_amount")}
+    mv = fields.get("market_value")
+    pnl_pct = fields.get("pnl_pct")
+    pnl_amount = fields.get("pnl_amount")
+    has_direct = "shares" in direct_db or "cost_nav" in direct_db
+    has_by_value = (mv is not None or pnl_pct is not None or pnl_amount is not None)
+
+    if has_direct and has_by_value:
+        raise ValueError("份额/成本净值与市值/持有盈亏不能同时填写")
+    if has_by_value:
+        if mv is None:
+            raise ValueError("按市值更新时必须提供 market_value")
+        if (pnl_pct is None) == (pnl_amount is None):
+            raise ValueError("持有盈亏率与持有盈亏额必须且只能填写一项")
+
+    # 先确保持仓存在（FundNotFound 早抛），并取得 fund_code
+    before = db.get_holding(holding_id)
+    if not before:
+        raise FundNotFound(f"持仓 {holding_id} 不存在")
+
+    # code 冲突检查
+    fc = direct_db.get("fund_code")
     if fc is not None:
         fc = str(fc)
-        fields["fund_code"] = fc
+        direct_db["fund_code"] = fc
         if not _CODE_RE.match(fc):
             raise ValueError(f"fund_code 必须为 6 位数字：{fc}")
         other = db.get_holding_by_code(fc)
         if other and other["id"] != holding_id:
             raise ConflictError("该基金已在持仓中")
-    if fields.get("shares") is not None and float(fields["shares"]) <= 0:
+
+    # 份额/成本 直接校验
+    if "shares" in direct_db and float(direct_db["shares"]) <= 0:
         raise ValueError("shares 必须大于 0")
-    if fields.get("cost_nav") is not None and float(fields["cost_nav"]) <= 0:
+    if "cost_nav" in direct_db and float(direct_db["cost_nav"]) <= 0:
         raise ValueError("cost_nav 必须大于 0")
-    if not db.update_holding(holding_id, **fields):
+
+    # 按市值反推 → 算新的 shares/cost_nav 合入 direct_db
+    if has_by_value:
+        target_code = fc if fc is not None else before["fund_code"]
+        new_shares, new_cost = _derive_shares_cost(
+            target_code, float(mv), pnl_pct, pnl_amount)
+        direct_db["shares"] = new_shares
+        direct_db["cost_nav"] = new_cost
+
+    # 空 db 字段集合但有 by_value 也会走到这里（因为 has_by_value=True 时把 shares/cost_nav 加进 direct_db 了）
+    if not direct_db:
+        raise ValueError("至少提供一个待更新字段")
+
+    if not db.update_holding(holding_id, **direct_db):
         raise FundNotFound(f"持仓 {holding_id} 不存在")
     h = db.get_holding(holding_id)
-    # 名称为空（如刚改过代码）时从名录补全，补不到保持空
+
+    # 名称为空（如刚改过代码）时从名录补全
     if not h["fund_name"]:
         filled = _name_of(h["fund_code"])
         if filled:

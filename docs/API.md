@@ -109,11 +109,26 @@
 - `cost_nav=0` 不合法（写入时 422），计算上无需处理
 
 ### `POST /api/portfolio`
+两种录入方式（二选一）：
+
 ```json
 {"fund_code": "161725", "shares": 10000, "cost_nav": 1.65,
  "fund_name": "", "note": ""}
 ```
-- 校验：`fund_code` 6 位数字；`shares>0`；`cost_nav>0`；`fund_name`/`note` 可选（≤50 字符）
+
+```json
+{"fund_code": "161725", "market_value": 10000, "pnl_pct": 12.5,
+ "fund_name": "", "note": ""}
+```
+- 直接录入：`shares>0`；`cost_nav>0`
+- 按市值反推：`market_value>0` + `pnl_pct` 或 `pnl_amount`（二者只能给一个，亏损为负）
+  - 服务端按最新净值计算：`shares = round(market_value / nav, 2)`；
+    `pnl_pct` 口径 `cost_nav = round(nav / (1 + pnl_pct/100), 4)`；
+    `pnl_amount` 口径 `cost_nav = round((market_value - pnl_amount) / shares, 4)`
+  - 约束：`pnl_pct > -100`；`pnl_amount < market_value`（保证成本净值为正）
+  - 取不到该基金最新净值 → `503`（无法反推）
+- 校验：`fund_code` 6 位数字；`fund_name`/`note` 可选（≤50 字符）；两种方式混填、
+  盈亏率与盈亏额同时给或都不给 → `422`
 - `fund_name` 为空时服务端自动从基金名录缓存补全（补不到留空）
 - 成功 `201` → `{"id": 1, ...}`（同 GET /api/portfolio 中一行，含实时计算字段）
 - 代码已存在 → `409 {"error": "该基金已在持仓中"}`
@@ -149,7 +164,7 @@
 | fund_info | `(code, force=False) -> dict` | 查不到抛 `FundNotFound` |
 | fund_nav | `(code, range_key="1y", force=False) -> (dict, stale: bool)` | dict 即 GET nav 响应体；stale 决定响应头 |
 | portfolio_view | `() -> dict` | 即 GET /api/portfolio 响应体 |
-| add_holding | `(fund_code, shares, cost_nav, fund_name="", note="") -> dict` | 重复 code 抛 `ConflictError` |
+| add_holding | `(fund_code, shares=None, cost_nav=None, fund_name="", note="", market_value=None, pnl_pct=None, pnl_amount=None) -> dict` | 重复 code 抛 `ConflictError`；按市值反推时 nav 不可用抛 `DataSourceError` |
 | update_holding | `(holding_id, **fields) -> dict` | fields ∈ fund_code/fund_name/shares/cost_nav/note |
 | delete_holding | `(holding_id) -> None` | 不存在抛 `FundNotFound` |
 

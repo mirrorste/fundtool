@@ -376,6 +376,84 @@ class TestPortfolioCRUD:
         assert client.delete("/api/portfolio/99999").status_code == 404
 
 
+class TestPortfolioByValue:
+    """按「当前市值 + 持有盈亏」反推份额与成本净值（新增持仓的第二种录入方式）。"""
+
+    def test_by_pnl_pct(self, client):
+        _clear_portfolio(client)
+        nav = mock_last_nav("161725")
+        mv, pct = 10000.0, 12.5
+        r = client.post("/api/portfolio", json={
+            "fund_code": "161725", "market_value": mv, "pnl_pct": pct})
+        assert r.status_code == 201
+        row = r.json()
+        expected_shares = round(mv / nav, 2)
+        expected_cost = round(nav / 1.125, 4)
+        assert row["shares"] == expected_shares
+        assert row["cost_nav"] == expected_cost
+        # 反推出的市值贴近输入（份额 2 位小数舍入导致 ≤0.01 偏差）
+        assert abs(row["market_value"] - mv) <= 0.01
+        # 反推后盈亏率与输入值一致（成本净值 4 位小数舍入误差 <0.05pct）
+        assert abs(row["pnl_pct"] - pct) < 0.05
+        assert row["fund_name"] == "招商中证白酒"
+
+    def test_by_pnl_amount(self, client):
+        _clear_portfolio(client)
+        nav = mock_last_nav("161725")
+        mv, pnl = 10000.0, 1000.0
+        r = client.post("/api/portfolio", json={
+            "fund_code": "161725", "market_value": mv, "pnl_amount": pnl})
+        assert r.status_code == 201
+        row = r.json()
+        expected_shares = round(mv / nav, 2)
+        assert row["shares"] == expected_shares
+        assert row["cost_nav"] == round((mv - pnl) / expected_shares, 4)
+        assert abs(row["pnl"] - pnl) <= 0.5
+
+    def test_loss_amount_accepted(self, client):
+        _clear_portfolio(client)
+        r = client.post("/api/portfolio", json={
+            "fund_code": "005827", "market_value": 10000, "pnl_pct": -8})
+        assert r.status_code == 201
+        assert r.json()["pnl_pct"] == -8.0 or abs(r.json()["pnl_pct"] + 8) < 0.05
+
+    def test_conflicting_modes_rejected(self, client):
+        _clear_portfolio(client)
+        cases = [
+            {"fund_code": "000011", "shares": 100, "cost_nav": 1.0,
+             "market_value": 1000, "pnl_pct": 5},            # 两种方式混填
+            {"fund_code": "000011", "market_value": 1000,
+             "pnl_pct": 5, "pnl_amount": 50},                # 盈亏率与额同时给
+            {"fund_code": "000011", "market_value": 1000},    # 缺盈亏
+            {"fund_code": "000011", "pnl_pct": 5},            # 缺市值
+            {"fund_code": "000011", "shares": 100},           # 直接模式缺成本
+        ]
+        for body in cases:
+            r = client.post("/api/portfolio", json=body)
+            assert r.status_code == 422, (body, r.status_code, r.text)
+            assert "detail" in r.json()
+        # mock 模式 GET 会对空表惰性播种，故只校验被拒的代码没有落库
+        codes = {h["code"] for h in client.get("/api/portfolio").json()["holdings"]}
+        assert "000011" not in codes
+
+    def test_invalid_pnl_values_rejected(self, client):
+        _clear_portfolio(client)
+        cases = [
+            {"fund_code": "000011", "market_value": 1000, "pnl_pct": -100},
+            {"fund_code": "000011", "market_value": 1000, "pnl_amount": 1000},
+            {"fund_code": "000011", "market_value": 0, "pnl_pct": 5},
+            {"fund_code": "000011", "market_value": -1, "pnl_amount": 10},
+        ]
+        for body in cases:
+            assert client.post("/api/portfolio", json=body).status_code == 422, body
+
+    def test_unknown_fund_by_value(self, client):
+        _clear_portfolio(client)
+        r = client.post("/api/portfolio", json={
+            "fund_code": "999999", "market_value": 1000, "pnl_pct": 5})
+        assert r.status_code in (404, 503)
+
+
 class TestPortfolioNoNav:
     """净值解析失败（排行/历史都没有）→ stale 行与 summary 排除。"""
 
