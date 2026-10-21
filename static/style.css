@@ -110,6 +110,12 @@ a { color: var(--primary); }
 }
 .data-table tbody tr:nth-child(even) { background: #fafbfc; }
 .data-table tbody tr:hover { background: #eff6ff; }
+.data-table tbody tr[data-code] { cursor: pointer; }
+/* 持仓表可排序列 */
+.sort-th { cursor: pointer; user-select: none; }
+.sort-th.sort-active { color: var(--primary); }
+.sort-th .sort-ind { display: inline-block; width: 14px; text-align: center; color: var(--muted); font-size: 11px; margin-left: 2px; }
+.sort-th.sort-active .sort-ind { color: var(--primary); font-weight: 700; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .up { color: var(--up); }
@@ -121,7 +127,16 @@ a { color: var(--primary); }
   border: 1px solid var(--border); border-radius: 4px;
   padding: 0 5px; font-size: 11px; margin-right: 5px;
 }
-.row-ops { display: flex; gap: 6px; }
+.row-ops { display: flex; gap: 4px; align-items: center; }
+.btn-icon {
+  width: 26px; height: 26px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 50%;
+  background: transparent; color: var(--muted); font-size: 14px; line-height: 1;
+  cursor: pointer; transition: all .15s;
+}
+.btn-icon:hover { color: var(--primary); background: #eff6ff; }
+.btn-icon-danger:hover { color: var(--danger); background: #fef2f2; }
 .rank-row { cursor: pointer; }
 .rank-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 
@@ -251,6 +266,7 @@ select:focus, input:focus {
 .form-row label { display: block; font-size: 13px; color: #374151; margin-bottom: 4px; }
 .form-row label b { color: var(--up); }
 .form-row input { width: 100%; }
+.form-row select { width: 100%; }
 .form-error {
   color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca;
   border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 13px;

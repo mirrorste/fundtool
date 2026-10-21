@@ -62,10 +62,12 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>代码</th><th>名称</th><th>备注</th>
+                <th>代码</th><th>名称</th>
                 <th class="num">份额</th><th class="num">成本净值</th><th class="num">最新净值</th>
-                <th>净值日期</th><th class="num">市值</th><th class="num">盈亏</th>
-                <th class="num">盈亏率</th><th>操作</th>
+                <th class="num sort-th" data-sort="market_value">市值<span class="sort-ind"></span></th>
+                <th class="num sort-th" data-sort="pnl">盈亏<span class="sort-ind"></span></th>
+                <th class="num sort-th" data-sort="pnl_pct">盈亏率<span class="sort-ind"></span></th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody id="portfolio-tbody"></tbody>
@@ -165,13 +167,39 @@
           <label for="f-code">基金代码 <b>*</b></label>
           <input id="f-code" inputmode="numeric" maxlength="6" placeholder="6 位数字代码，如 161725">
         </div>
-        <div class="form-row">
+        <div class="form-row" id="row-mode">
+          <label for="f-mode">录入方式</label>
+          <select id="f-mode">
+            <option value="direct">按份额 + 成本净值</option>
+            <option value="value" selected>按当前市值 + 持有盈亏（自动算份额/成本）</option>
+          </select>
+        </div>
+        <div class="form-row" id="row-shares">
           <label for="f-shares">份额 <b>*</b></label>
           <input id="f-shares" type="number" min="0" step="any" placeholder="如 10000">
         </div>
-        <div class="form-row">
+        <div class="form-row" id="row-cost">
           <label for="f-cost">成本净值 <b>*</b></label>
           <input id="f-cost" type="number" min="0" step="any" placeholder="如 1.65">
+        </div>
+        <div class="form-row hidden" id="row-mv">
+          <label for="f-mv">当前市值（元） <b>*</b></label>
+          <input id="f-mv" type="number" min="0" step="any" placeholder="如 10000">
+        </div>
+        <div class="form-row hidden" id="row-pnl-type">
+          <label for="f-pnl-type">持有盈亏口径</label>
+          <select id="f-pnl-type">
+            <option value="pct" selected>持有盈亏率（%）</option>
+            <option value="amount">持有盈亏额（元）</option>
+          </select>
+        </div>
+        <div class="form-row hidden" id="row-pnl-pct">
+          <label for="f-pnl-pct">持有盈亏率（%） <b>*</b></label>
+          <input id="f-pnl-pct" type="number" step="any" placeholder="盈利如 12.5，亏损填 -8">
+        </div>
+        <div class="form-row hidden" id="row-pnl-amt">
+          <label for="f-pnl-amt">持有盈亏额（元） <b>*</b></label>
+          <input id="f-pnl-amt" type="number" step="any" placeholder="盈利如 1200，亏损填 -300">
         </div>
         <div class="form-row">
           <label for="f-name">基金名称</label>
