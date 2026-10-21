@@ -30,6 +30,18 @@ def _to_date(s: pd.Series) -> pd.Series:
     return pd.to_datetime(s, errors="coerce").dt.strftime("%Y-%m-%d")
 
 
+def _pct(s: pd.Series) -> pd.Series:
+    """数值费率 → 百分号字符串（0.15 → "0.15%"）；已含 % 的原样保留，缺失为 ""。"""
+    def one(v):
+        if v is None or pd.isna(v):
+            return ""
+        t = str(v).strip()
+        if not t or t.lower() == "nan":
+            return ""
+        return t if "%" in t else f"{t}%"
+    return s.map(one)
+
+
 class AkshareClient:
 
     def get_open_fund_rank(self, fund_type: str = "全部") -> pd.DataFrame:
@@ -64,10 +76,14 @@ class AkshareClient:
     def get_fund_names(self) -> pd.DataFrame:
         import akshare as ak
         raw = _with_retries(ak.fund_name_em)
+        # AKShare 1.18.88 返回「基金类型」，旧版本为「类型」
+        type_col = "基金类型" if "基金类型" in raw.columns else "类型"
+        if "基金代码" not in raw.columns or type_col not in raw.columns:
+            raise DataSourceError(f"名录接口返回列异常：{list(raw.columns)[:8]}")
         return pd.DataFrame({
             "code": raw["基金代码"].astype(str),
             "name": raw["基金简称"].astype(str),
-            "type": raw["类型"].astype(str),
+            "type": raw[type_col].astype(str),
         })
 
     def get_fund_nav_history(self, code: str, period: str = "成立来") -> pd.DataFrame:
@@ -116,6 +132,9 @@ class AkshareClient:
         return pd.DataFrame({
             "code": raw["基金代码"].astype(str),
             "name": raw["基金简称"].astype(str),
-            "fee_rate": raw["申购费率"].astype(str) if "申购费率" in raw.columns else "",
+            # AKShare 1.18.88 用「手续费」（数值百分比），旧版本为「申购费率」+「折扣率」
+            "fee_rate": (_pct(raw["手续费"]) if "手续费" in raw.columns
+                         else raw["申购费率"].astype(str) if "申购费率" in raw.columns
+                         else ""),
             "discount": raw["折扣率"].astype(str) if "折扣率" in raw.columns else "",
         })
